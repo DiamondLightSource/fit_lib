@@ -5,6 +5,49 @@ from cothread import catools
 import numpy
 
 
+def format_raw_image(raw_image, width, height):
+    '''Reformats a one dimensional array into a two dimensional image while
+    preserving the timestamp information.'''
+    # Annoyingly the timestamp gets lost when we reshape the image, so we need
+    # to save it and put it back afterwards.
+    timestamp = raw_image.timestamp
+    # The order of arguments in the reshape reflects the fact that the camera
+    # image is formatted line by line.  We transpose the result so that the
+    # image can be indexed as image[x,y] with x running horizontally and y
+    # vertically without confusion.
+    raw_image = raw_image.reshape((height, width)).T
+    raw_image.timestamp = timestamp
+    return raw_image
+
+
+class _Subscription:
+    def __init__(self, camera, pv, max_backlog):
+        self.camera = camera
+        self.max_backlog = max_backlog
+        self.backlog = 0
+        self.queue = cothread.EventQueue()
+        self.subscription = catools.camonitor(pv, self.__on_update,
+            format = catools.FORMAT_TIME)
+
+    def close(self):
+        self.queue.close()
+        self.subscription.close()
+
+    def __on_update(self, value):
+        self.backlog += 1
+        if self.max_backlog and self.backlog > self.max_backlog:
+            # Whoops, too many unprocessed values.  Discard this one and close
+            # everything.
+            self.close()
+        else:
+            self.queue.Signal((value, self.camera.width, self.camera.height))
+
+    def get_image(self, timeout=5):
+        raw_image, width, height = self.queue.Wait(timeout)
+        self.backlog -= 1
+        return format_raw_image(raw_image, width, height)
+
+
 class Mr1394:
     '''Interface over EPICS to Mr1394 firewire cameras.'''
 
@@ -33,19 +76,15 @@ class Mr1394:
     def get_image(self, timeout=5):
         '''Attempts to retrieve an image with the currently configured height
         and width.  If there's a size mismatch an exception is raised.'''
-        raw = catools.caget(
-            '%s:DATA' % self.name, timeout=timeout, format=catools.FORMAT_TIME)
-        timestamp = raw.timestamp
-        # The order of arguments in the reshape reflects the fact that the
-        # camera image is formatted line by line.  We transpose the result so
-        # that the image can be indexed as image[x,y] with x running
-        # horizontally and y vertically without confusion.
-        raw = raw.reshape((self.height, self.width)).T
-        raw.timestamp = timestamp
-        return raw
+        raw_image = catools.caget('%s:DATA' % self.name,
+            timeout = timeout, format = catools.FORMAT_TIME)
+        return format_raw_image(raw_image, self.width, self.height)
 
     def set_gain(self, gain):
         catools.caput('%s:SET_GAIN' % self.name, gain)
 
     def set_shutter(self, shutter):
         catools.caput('%s:SET_SHUTTR' % self.name, shutter)
+
+    def subscribe(self, max_backlog = 10):
+        return _Subscription(self, '%s:DATA' % self.name, max_backlog)

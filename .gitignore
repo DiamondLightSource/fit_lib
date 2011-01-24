@@ -1,1 +1,6 @@
 *.pyc
+
+# Build results
+/build
+/dist
+/fit_lib.egg-info
