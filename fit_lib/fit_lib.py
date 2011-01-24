@@ -68,14 +68,14 @@ def convert_sigma_theta(sigma_x, sigma_y, theta):
 #
 #   base, amplitude, x_0, A
 
-def prefit_1D_Gaussian(data, origin, scale):
+def prefit_1D_Gaussian(data):
     assert data.ndim == 1
     min = float(data.min())
     max = float(data.max())
-    x = numpy.arange(len(data)) - origin
+    x = numpy.arange(len(data))
     data_x = data / float(data.sum())
-    mean = numpy.sum(x * data_x) * scale
-    var  = numpy.sum((x - mean) * data_x) * scale*scale
+    mean = numpy.sum(x * data_x)
+    var  = numpy.sum((x - mean) * data_x)
     return numpy.array([min, max - min, mean, 0.5 / var])
 
 def Gaussian1dValid(params):
@@ -99,6 +99,10 @@ def Gaussian1dJacobian(params, x):
         2 * A * x * KE,                 # dG/dx_0
         - x2 * KE])                     # dG/dA
 
+def Gaussian1dRescale(params, origin=0, scaling=1):
+    g_0, K, x_0, A = params
+    return (g_0, K, scaling * (x_0 - origin), A / (scaling*scaling))
+
 def WindowGaussian1d(params, window):
     _, _, x_0, A = params
     w = window * math.sqrt(0.5 / A)
@@ -118,17 +122,19 @@ class Fitter1dGaussian(static.Static):
 # ------------------------------------------------------------------------------
 # 2D Gaussian fit
 
-# The 2D Gaussian model is parameterised by six parameters:
+# The 2D Gaussian model is parameterised by six values:
 #
-#   base, amplitude, x_0, y_0, A, B, C
+#   g_0, K, x_0, y_0, A, B, C
+#
+# corresponding to the calculation
+#
+#   G(x,y) = g_0 + K * exp(-A*(x-x_0)**2 - B*(y-y_0)**2 - C*(x-x_0)*(y-y_0))
 
 
-def prefit_2D_Gaussian(image, origin, scale):
+def prefit_2D_Gaussian(image):
     '''Computes initial estimates for 2D Gaussian fit to image.  Returns array
     of parameters in the order for fitting.'''
 
-    x0, y0 = origin
-    xs, ys = scale
     assert image.ndim == 2 and (numpy.array(image.shape) > 1).all(), \
         'Can only fit to rectangular image'
 
@@ -144,15 +150,15 @@ def prefit_2D_Gaussian(image, origin, scale):
     image_x = image.sum(axis = 1) / total
     image_y = image.sum(axis = 0) / total
     # Compute x and y grids with given scale and origin
-    x = numpy.arange(len(image_x)) - x0
-    y = numpy.arange(len(image_y)) - y0
+    x = numpy.arange(len(image_x))
+    y = numpy.arange(len(image_y))
 
     # Compute statistics along each axis.
     # Note that these are only good if we have a complete enough curve!
-    mean_x = numpy.sum(x * image_x) * xs
-    var_x  = numpy.sum((x - mean_x)**2 * image_x) * xs*xs
-    mean_y = numpy.sum(y * image_y) * ys
-    var_y  = numpy.sum((y - mean_y)**2 * image_y) * ys*ys
+    mean_x = numpy.sum(x * image_x)
+    var_x  = numpy.sum((x - mean_x)**2 * image_x)
+    mean_y = numpy.sum(y * image_y)
+    var_y  = numpy.sum((y - mean_y)**2 * image_y)
     # Convert to initial Gaussian fit parameters
     return numpy.array([
         min, max - min, mean_x, mean_y, 0.5 / var_x, 0.5 / var_y, 0.0])
@@ -227,6 +233,20 @@ def fit2dGaussian_0(params, xy, data, **kargs):
     return numpy.concatenate(([g_0], result)), chi2
 
 
+def Gaussian2dRescale(params, origin=0, scaling=1):
+    '''Rescales the coordinates of the fit to the specified origin and scaling
+    so that the new coordinate and old coordinates are related by the equation
+
+        new_coord = scaling * (old_coord - origin)
+    '''
+    g_0, K, x_0, y_0, A, B, C = params
+    O_x, O_y = normalise_sequence(origin, 2)
+    s_x, s_y = normalise_sequence(scaling, 2)
+    return (
+        g_0, K, s_x * (x_0 - O_x), s_y * (y_0 - O_y),
+        A / (s_x*s_x), B / (s_y*s_y), C / (s_x*s_y))
+
+
 # Gather the key elements of these fitters.
 
 class Fitter2dGaussian(static.Static):
@@ -299,29 +319,13 @@ def thin_ordered_by(factor):
     return lambda grid, data: thin_ordered(factor, grid, data)
 
 
-def apply_ROI(data, origin, ROI):
-    '''Applies a Region Of Interest to image returning the windowed image
-    together with the updated origin.  The ROI is a pair (ROI_origin, extent)
-    specifying the offset of the ROI relative to the image origin and the extent
-    of the ROI, all units being in pixels.'''
-    ROI_origin, extent = ROI
-    low = origin + ROI_origin
-    high = low + extent
-    # Clip the low index to avoid negative indexes, and ensure high is entirely
-    # positive for the same reason.
+def apply_ROI(data, origin, extent):
+    '''Returns data[origin:origin+extent].'''
+    low = numpy.array(normalise_sequence(origin, data.ndim))
+    high = low + normalise_sequence(extent, data.ndim)
     low[low < 0] = 0
     assert numpy.all(high > 0), 'An axis of the window is outside the dataset'
-    index = tuple(numpy.s_[l:h] for l, h in zip(low, high))
-    return data[index], origin - low
-
-
-def apply_scaled_window(data, origin, scaling, window):
-    '''Applies the given window to data.'''
-    # Convert the computed window into a new Region Of Interest
-    window_origin, window_extent = window
-    return apply_ROI(data, origin,
-        (numpy.int_(window_origin / scaling),
-         numpy.int_(window_extent / scaling)))
+    return data[tuple(numpy.s_[l:h] for l, h in zip(low, high))]
 
 
 def gamma_correct(data, gamma, max_data):
@@ -334,34 +338,35 @@ def gamma_correct(data, gamma, max_data):
 
 
 def doFit(fitter, data,
-        origin=0, scaling=1,
         ROI=None, window_size=None,
         thinning=None, data_thinning=None,
         gamma=None,
         results=None, **kargs):
-    '''General fitter.  Takes the following arguments:
+    '''General fitter.  Returns the best fit together with the mean chi2 over
+    the filtered data set.
+
+    Takes the following arguments:
 
     fitter
         This object should have three attributes, .prefit, .fit and .window:
 
-            initial = .prefit(data, origin, scaling)
-                Returns an initial estimate of the fit to data taking into
-                account the giving origin and scaling.  The result is an array
-                of values suitable for passing to the .fit and .window routines.
+            initial = .prefit(data)
+                Returns an initial estimate of the fit to data.  The result is
+                an array of values suitable for passing to the .fit and .window
+                routines.
 
             origin, extent = .window(initial, size)
                 Returns a "region of interest" computed from the initial
                 parameters scaled by size, normally in standard deviations.  The
-                region of interest is returned in scaled units, and is converted
-                back into pixels to select a sub-region of the data.
+                result will be truncated to integer pixel counts.
 
             fit, error = .fit(initial, grid, data, **kargs)
                 The detailed fitting operation is performed starting from the
                 computed initial parameters.  The data will have been thinned
                 and windowed by this point, and the grid defines the coordinates
-                of each data point with the original origin and scaling taken
-                into account.  Extra arguments are passed through to the
-                underlying fit algorithm.
+                of each data point with respect to the original data set, in
+                pixels.  Extra arguments are passed through to the underlying
+                fit algorithm.
                     data is a vector with N points, grid is a MxN matrix where M
                 is the dimensionality (.ndim) of the original data set.
 
@@ -369,22 +374,11 @@ def doFit(fitter, data,
         This is the initial data to be fitted, and should have the correct
         number of dimensions expected by the fitter.
 
-    origin, scaling
-        The translation from pixel coordinates (indexed by integers starting
-        from 0) to underlying model coordinates is specified by these
-        parameters, and the returned fit will be in terms of the model
-        coordinates.  The translation from pixel coordinates to model
-        coordinates is given by the equation
-
-            model_units = scaling * (pixel_units - origin)
-
-        so the origin is in pixel coordinates, and the scaling is in model units
-        per pixel.
-
     ROI
         If specified this is a "Region Of Interest", consisting of a pair
-        (ROI_origin, ROI_extent) where ROI_origin is in pixels relative to
-        origin and ROI_extent is the size of the region of interest in pixels.
+        (ROI_origin, ROI_extent) where ROI_origin is the index into data of the
+        first point of the region of interest and ROI_extent is the size of the
+        region of interest.
 
     window_size
         If specified this is a window size to be passed to fitter.window() to
@@ -413,44 +407,45 @@ def doFit(fitter, data,
         If results is passed then intermediate computations will be assigned to
         fields of this structure as follows:
 
-            .grid   Final chosen grid used for fitting
-            .data   Final data set used for fitting
+            .grid       Final chosen grid used for fitting
+            .data       Final data set used for fitting
+            .origin     Offset of selected window into original data
+            .extent     Dimensions of window into original data
     '''
-
-    # Convert inputs into arrays of the appropriate size
-    origin = numpy.require(normalise_sequence(origin, data.ndim), dtype=int)
-    scaling = numpy.array(normalise_sequence(scaling, data.ndim))
 
     # Apply Region Of Interest if specified.
     if ROI:
-        data, origin = apply_ROI(data, origin, ROI)
-    assert data.size, 'No data to fit'
+        origin, extent = map(numpy.array, ROI)
+        data = apply_ROI(data, origin, extent)
+    else:
+        origin = numpy.zeros(data.ndim)
+        extent = data.shape
 
     # Create a sensible initial fit.
-    initial = fitter.prefit(data, origin, scaling)
+    initial = fitter.prefit(data)
 
     # Window the data if required.
     if window_size is not None:
-        data, origin = apply_scaled_window(
-            data, origin, scaling, fitter.window(initial, window_size))
+        window_origin, extent = \
+            map(numpy.int_, fitter.window(initial, window_size))
+        origin += window_origin
+        data = apply_ROI(data, window_origin, extent)
 
-    if thinning is not None:
+    if thinning is None:
+        thinning = numpy.ones(data.ndim)
+    else:
         # Thin the data uniformly in all dimensions.
+        thinning = numpy.array(normalise_sequence(thinning, data.ndim))
         data = thin_uniformly(data, thinning)
-        origin /= thinning
-        scaling *= thinning
 
-    # Compute the appropriate coordinate grid and perform any further data
-    # dependent thinning if required; finally we the data down to a single
-    # dimension for fitting.
+    # Compute the coordinate grid with the correct coordinates taking thinning
+    # and window offsets into account and flatten both the grid and the data to
+    # a single dimension in preparation for fitting.
     grid = flatten_grid(create_grid(data.shape))
-    grid = scaling[:, None] * (grid - origin[:, None])
+    grid = thinning[:, None] * grid + origin[:, None]
     data = data.flatten()
-    if results:
-        results.grid = grid
-        results.data = data
 
-    # Do data dependent thinning if selected.
+    # Do data dependent thinning if requested.
     if data_thinning:
         grid, data = data_thinning(grid, data)
 
@@ -460,6 +455,14 @@ def doFit(fitter, data,
 
     # Perform the fit on the reduced data set and return the result.
     fit, chi2 = fitter.fit(initial, grid, data, **kargs)
+
+    # If intermediate results requested make them available
+    if results:
+        results.grid = grid
+        results.data = data
+        results.origin = origin
+        results.extent = extent
+
     return fit, chi2 / len(data)
 
 
