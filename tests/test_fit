@@ -1,0 +1,41 @@
+#!/dls_sw/prod/tools/RHEL5/bin/python2.6
+
+# Simple testing of fit
+
+from pkg_resources import require
+require('cothread')
+require('scipy')
+require('matplotlib')
+
+
+import sys
+import os
+import scipy.io
+import cothread
+
+from matplotlib import pyplot
+
+cothread.iqt()
+
+sys.path.append(os.path.realpath(
+    os.path.join(os.path.dirname(__file__), '..')))
+
+from fit_lib import fit_lib
+
+
+try:
+    filename, = sys.argv[1:]
+except ValueError:
+    print 'Usage: test_fit <filename>'
+    sys.exit(1)
+
+image = scipy.io.loadmat(filename)['image']
+print image.shape
+
+pyplot.imshow(image.T)
+pyplot.show()
+
+fit, error = fit_lib.doFit2dGaussian(image, thinning=(10,10), window_size = 4)
+print fit, error
+
+cothread.WaitForQuit()
