@@ -68,6 +68,16 @@ def convert_sigma_theta(sigma_x, sigma_y, theta):
 #
 #   base, amplitude, x_0, A
 
+def prefit_1D_Gaussian(data, origin, scale):
+    assert data.ndim == 1
+    min = float(data.min())
+    max = float(data.max())
+    x = numpy.arange(len(data)) - origin
+    data_x = data / float(data.sum())
+    mean = numpy.sum(x * data_x) * scale
+    var  = numpy.sum((x - mean) * data_x) * scale*scale
+    return numpy.array([min, max - min, mean, 0.5 / var])
+
 def Gaussian1dValid(params):
     return params[-1] > 0
 
@@ -93,6 +103,12 @@ def fit1dGaussian(params, x, data):
         Gaussian1dValid, Gaussian1d, Gaussian1dJacobian, params, data, (x,))
 
 
+class Fitter1dGaussian(static.Static):
+    prefit = prefit_1D_Gaussian
+    fit    = fit1dGaussian
+    window = WindowGaussian1d
+
+
 # ------------------------------------------------------------------------------
 # 2D Gaussian fit
 
@@ -101,11 +117,13 @@ def fit1dGaussian(params, x, data):
 #   base, amplitude, x_0, y_0, A, B, C
 
 
-def prefit_2D_Gaussian(image):
+def prefit_2D_Gaussian(image, origin, scale):
     '''Computes initial estimates for 2D Gaussian fit to image.  Returns array
     of parameters in the order for fitting.'''
 
-    assert len(image.shape) == 2 and (numpy.array(image.shape) > 1).all(), \
+    x0, y0 = origin
+    xs, ys = scale
+    assert image.ndim == 2 and (numpy.array(image.shape) > 1).all(), \
         'Can only fit to rectangular image'
 
     # This is done by projecting the image onto X and Y (by taking means) and
@@ -118,29 +136,33 @@ def prefit_2D_Gaussian(image):
     # Project the image onto its axes, convert these into densities
     total = float(image.sum())
     image_x = image.sum(axis = 1) / total
-    x = numpy.arange(len(image_x))
     image_y = image.sum(axis = 0) / total
-    y = numpy.arange(len(image_y))
+    # Compute x and y grids with given scale and origin
+    x = numpy.arange(len(image_x)) - x0
+    y = numpy.arange(len(image_y)) - y0
 
     # Compute statistics along each axis.
     # Note that these are only good if we have a complete enough curve!
-    mean_x = numpy.sum(x * image_x)
-    var_x  = numpy.sum((x - mean_x)**2 * image_x)
-    mean_y = numpy.sum(y * image_y)
-    var_y  = numpy.sum((y - mean_y)**2 * image_y)
+    mean_x = numpy.sum(x * image_x) * xs
+    var_x  = numpy.sum((x - mean_x)**2 * image_x) * xs*xs
+    mean_y = numpy.sum(y * image_y) * ys
+    var_y  = numpy.sum((y - mean_y)**2 * image_y) * ys*ys
     # Convert to initial Gaussian fit parameters
     return numpy.array([
         min, max - min, mean_x, mean_y, 0.5 / var_x, 0.5 / var_y, 0.0])
 
 
 def WindowGaussian2d(params, window):
-    '''Returns a sensible region in which to attempt the fit.'''
+    '''Returns a sensible region in which to attempt the fit.  In this case
+    we return +-window*sigma around the fitted origin.'''
     _, _, mean_x, mean_y, A, B, _ = params
-    win_x = window * math.sqrt(0.5 / A)
-    win_y = window * math.sqrt(0.5 / B)
-    return (
-        (max(0, int(mean_x - win_x)), int(mean_x + win_x)),
-        (max(0, int(mean_y - win_y)), int(mean_y + win_y)))
+#     win_x = window * math.sqrt(0.5 / A)
+#     win_y = window * math.sqrt(0.5 / B)
+#     return ((mean_x - win_x, mean_y - win_y), (2*win_x, 2*win_y))
+    m = numpy.array((mean_x, mean_y))
+    AB = numpy.array((A, B))
+    w = window * numpy.sqrt(0.5 / AB)
+    return (m - w, 2*w)
 
 
 def Gaussian2dValid(params):
@@ -245,19 +267,16 @@ def normalise_sequence(input, rank):
         return input
 
 
-def thin_uniformly(grid, data, factor):
+def thin_uniformly(data, factor):
+    factor = normalise_sequence(factor, data.ndim)
+    return data[tuple(numpy.s_[::f] for f in factor)]
+
     '''Given a grid and a dataset indexed by that grid reduces the dataset by a
     factor of F^M where M is the number of dimensions of data and F is the
     thinning factor.'''
     # Again numpy index hacks.  The two dimensional expression would be
     #   xy[:, ::factor, ::factor], data[::factor, ::factor]
     ix = tuple(numpy.s_[::f] for f in normalise_sequence(factor, data.ndim))
-    return grid[(numpy.s_[:],) + ix], data[ix]
-
-
-def apply_window(window, grid, data):
-    '''Applies the given window to xy and data.'''
-    ix = tuple(numpy.s_[l:h] for l, h in window)
     return grid[(numpy.s_[:],) + ix], data[ix]
 
 
@@ -269,26 +288,35 @@ def flatten_grid(grid):
     return grid.reshape((M, grid.size // M))
 
 
-def thin_ordered(factor, xy, data):
+def thin_ordered(factor, grid, data):
     '''Thins the data in order of intensity.'''
     thinning = numpy.argsort(data)[::factor]
-    return (xy[:, thinning], data[thinning])
+    return (grid[:, thinning], data[thinning])
 
 
-def apply_ROI(image, ROI):
-    '''Applies an optional Region Of Interest to image returning the windowed
-    image (if appropriate) together with the associated offsets.  The ROI is
-    either None if not required or four numbers definining the region of
-    interest: (min_x, max_x, min_y, max_y).'''
-    if ROI:
-        min_x, max_x, min_y, max_y = ROI
-        image = image[min_x:max_x, min_y:max_y]
-        if image.size:
-            return image, min_x, min_y
-        else:
-            raise FitError('Region of interest lies outside image')
-    else:
-        return image, 0, 0
+def apply_ROI(data, origin, ROI):
+    '''Applies a Region Of Interest to image returning the windowed image
+    together with the updated origin.  The ROI is a pair (ROI_origin, extent)
+    specifying the offset of the ROI relative to the image origin and the extent
+    of the ROI, all units being in pixels.'''
+    ROI_origin, extent = ROI
+    low = origin + ROI_origin
+    high = low + extent
+    # Clip the low index to avoid negative indexes, and ensure high is entirely
+    # positive for the same reason.
+    low[low < 0] = 0
+    assert numpy.all(high > 0), 'An axis of the window is outside the dataset'
+    index = tuple(numpy.s_[l:h] for l, h in zip(low, high))
+    return data[index], origin - low
+
+
+def apply_window(data, origin, scaling, window):
+    '''Applies the given window to data.'''
+    # Convert the computed window into a new Region Of Interest
+    window_origin, window_extent = window
+    return apply_ROI(data, origin,
+        (numpy.int_(window_origin / scaling),
+         numpy.int_(window_extent / scaling)))
 
 
 def gamma_correct(data, gamma, max_data):
@@ -300,7 +328,10 @@ def gamma_correct(data, gamma, max_data):
 # ------------------------------------------------------------------------------
 
 
-def doFit(fitter, data, thinning=None, gamma=None, window=0, ROI=None, **kargs):
+def doFit(fitter, data,
+        thinning=None, data_thinning=None,
+        gamma=None, window=None, ROI=None, origin=0,
+        scaling=1, **kargs):
     '''General fitter.  Takes the following arguments:
 
     fitter
@@ -312,28 +343,41 @@ def doFit(fitter, data, thinning=None, gamma=None, window=0, ROI=None, **kargs):
         This is the initial data to be fitted.
     '''
 
-    # Start with a sensible initial guess.  This will guide our subsequent
-    # windowing and thinning.  Create a full grid to cover the selected data.
-    initial = fitter.prefit(data)
-    xy_grid = grid(data.shape)
+    # Convert inputs into arrays of the appropriate size
+    origin = numpy.require(normalise_sequence(origin, data.ndim), dtype=int)
+    scaling = numpy.array(normalise_sequence(scaling, data.ndim))
 
-    # Window the data if required.  We window with both an optional "Region Of
-    # Interest" and an automatic window determined from the prefit parameters.
-    if window > 0:
-        xy_grid, data = apply_window(
-            fitter.window(initial, window), xy_grid, data)
+    # Apply Region Of Interest if specified.
+    if ROI:
+        data, origin = apply_ROI(data, origin, ROI)
+    assert data.size, 'No data to fit'
 
-    if thinning:
-        # Thin the data on the original grid so we thin uniformly in both
-        # dimensions.
-        xy_grid, data = thin_uniformly(xy_grid, data, thinning)
+    # Create a sensible initial fit.
+    initial = fitter.prefit(data, origin, scaling)
 
-    # Flatten the data down to a single dimension for fitting.
-    xy = flatten_grid(xy_grid)
+    # Window the data if required.
+    if window is not None:
+        data, origin = apply_window(
+            data, origin, scaling, fitter.window(initial, window))
+
+    if thinning is not None:
+        # Thin the data uniformly in all dimensions.
+        data = thin_uniformly(data, thinning)
+        origin /= thinning
+        scaling *= thinning
+
+    # Compute the appropriate coordinate grid and perform any further data
+    # dependent thinning if required; finally we the data down to a single
+    # dimension for fitting.
+    xy = flatten_grid(grid(data.shape))
+    xy = scaling[:, None] * (xy - origin[:, None])
     data = data.flatten()
 
-    # Perform gamma correction on the data before performing the fit but after
-    # everything else, simply to reduce the cost of this operation.
+    # Do data dependent thinning if selected.
+    if data_thinning:
+        xy, data = data_thinning(xy, data)
+
+    # Finally perform gamma correction on the data before performing the fit.
     if gamma:
         data = gamma_correct(data, *gamma)
 
@@ -341,9 +385,12 @@ def doFit(fitter, data, thinning=None, gamma=None, window=0, ROI=None, **kargs):
     result, chi2 = fitter.fit(initial, xy, data, **kargs)
     return result, chi2 / len(data)
 
+
 def MakeDoFit(fitter):
     return lambda image, **kargs: doFit(fitter, image, **kargs)
 
 
 doFit2dGaussian   = MakeDoFit(Fitter2dGaussian)
 doFit2dGaussian_0 = MakeDoFit(Fitter2dGaussian_0)
+
+doFit1dGaussian   = MakeDoFit(Fitter1dGaussian)
