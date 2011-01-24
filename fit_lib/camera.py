@@ -1,13 +1,14 @@
 '''Low level camera interface.'''
 
+import sys
 import cothread
 from cothread import catools
-import numpy
 
 
 def format_raw_image(raw_image, width, height):
     '''Reformats a one dimensional array into a two dimensional image while
-    preserving the timestamp information.'''
+    preserving the timestamp information.  Will raise an exception if the given
+    image dimensions don't match the image size.'''
     # Annoyingly the timestamp gets lost when we reshape the image, so we need
     # to save it and put it back afterwards.
     timestamp = raw_image.timestamp
@@ -21,6 +22,8 @@ def format_raw_image(raw_image, width, height):
 
 
 class _Subscription:
+    '''Used to capture a continuous stream of images.'''
+
     def __init__(self, camera, pv, max_backlog):
         self.camera = camera
         self.max_backlog = max_backlog
@@ -38,14 +41,24 @@ class _Subscription:
         if self.max_backlog and self.backlog > self.max_backlog:
             # Whoops, too many unprocessed values.  Discard this one and close
             # everything.
+            print >>sys.stderr, 'Image subscription backlog too large'
             self.close()
         else:
+            # We store the current camera image dimensions with the image as we
+            # capture it so we have a fighting chance of getting the right
+            # dimensions if the image changes during capture.
             self.queue.Signal((value, self.camera.width, self.camera.height))
 
     def get_image(self, timeout=5):
         raw_image, width, height = self.queue.Wait(timeout)
         self.backlog -= 1
         return format_raw_image(raw_image, width, height)
+
+
+    # The following two methods turn this subscription object into an iterable
+    # object.
+    def __iter__(self): return self
+    next = get_image
 
 
 class Mr1394:
