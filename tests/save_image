@@ -26,7 +26,5 @@ except ValueError:
     sys.exit(1)
 
 cam = camera.Mr1394(pv)
-cam.wait_start()
-
 image = cam.get_image()
 scipy.io.savemat(filename, dict(image = image), oned_as = 'row')
