@@ -1,15 +1,8 @@
 '''Low level camera interface.'''
 
+import cothread
 from cothread import catools
 import numpy
-import scipy.signal
-
-
-def monitor_variable(self, pv, field, default=None):
-    def update(value):
-        setattr(self, field, value)
-    setattr(self, field, default)
-    catools.camonitor(pv, update)
 
 
 class Mr1394:
@@ -20,13 +13,25 @@ class Mr1394:
     MIN_SHUTTER = 1
     MAX_SHUTTER = 4095
 
+    def monitor_variable(self, pv, field, default, wait=False):
+        def update(value):
+            setattr(self, field, value)
+            if wait:
+                event.Signal()
+        if wait:
+            event = cothread.Event(auto_reset = False)
+            self.__waits.append(event)
+        setattr(self, field, default)
+        catools.camonitor(pv, update)
+
     def __init__(self, name):
         self.name = name
-        monitor_variable(self, '%s:WIDTH' % name, 'width', 0)
-        monitor_variable(self, '%s:HEIGHT' % name, 'height', 0)
-        monitor_variable(self, '%s:STATUS' % name, 'status', 0)
-        monitor_variable(self, '%s:SET_GAIN' % name, 'gain', 0)
-        monitor_variable(self, '%s:SET_SHUTTR' % name, 'shutter', 0)
+        self.__waits = []
+        self.monitor_variable('%s:WIDTH' % name, 'width', 0, True)
+        self.monitor_variable('%s:HEIGHT' % name, 'height', 0, True)
+        self.monitor_variable('%s:STATUS' % name, 'status', 0)
+        self.monitor_variable('%s:SET_GAIN' % name, 'gain', 0)
+        self.monitor_variable('%s:SET_SHUTTR' % name, 'shutter', 0)
         # Note that the camera provides GAIN and SHUTTER fields, but these don't
         # appear to update normally.
 
@@ -45,3 +50,7 @@ class Mr1394:
 
     def set_shutter(self, shutter):
         catools.caput('%s:SET_SHUTTR' % self.name, shutter)
+
+    def wait_start(self, timeout=5):
+        '''Waits for the important field to be populated.'''
+        cothread.WaitForAll(self.__waits, timeout = timeout)

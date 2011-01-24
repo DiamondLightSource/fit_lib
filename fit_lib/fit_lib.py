@@ -79,7 +79,8 @@ def prefit_1D_Gaussian(data, origin, scale):
     return numpy.array([min, max - min, mean, 0.5 / var])
 
 def Gaussian1dValid(params):
-    return params[-1] > 0
+    _, _, _, A = params
+    return A > 0
 
 def Gaussian1d(params, x):
     g_0, K, x_0, A = params
@@ -97,6 +98,11 @@ def Gaussian1dJacobian(params, x):
         E,                              # dG/dK
         2 * A * x * KE,                 # dG/dx_0
         - x2 * KE])                     # dG/dA
+
+def WindowGaussian1d(params, window):
+    _, _, x_0, A = params
+    w = window * math.sqrt(0.5 / A)
+    return (x_0 - w, 2*w)
 
 def fit1dGaussian(params, x, data):
     return levmar.fit(
@@ -156,13 +162,9 @@ def WindowGaussian2d(params, window):
     '''Returns a sensible region in which to attempt the fit.  In this case
     we return +-window*sigma around the fitted origin.'''
     _, _, mean_x, mean_y, A, B, _ = params
-#     win_x = window * math.sqrt(0.5 / A)
-#     win_y = window * math.sqrt(0.5 / B)
-#     return ((mean_x - win_x, mean_y - win_y), (2*win_x, 2*win_y))
-    m = numpy.array((mean_x, mean_y))
-    AB = numpy.array((A, B))
-    w = window * numpy.sqrt(0.5 / AB)
-    return (m - w, 2*w)
+    win_x = window * math.sqrt(0.5 / A)
+    win_y = window * math.sqrt(0.5 / B)
+    return ((mean_x - win_x, mean_y - win_y), (2*win_x, 2*win_y))
 
 
 def Gaussian2dValid(params):
@@ -242,7 +244,7 @@ class Fitter2dGaussian_0(static.Static):
 
 # Windowing functionality.
 
-def grid(shape):
+def create_grid(shape):
     '''Given a shape tuple (N_1, ..., N_M) returns a coordinate grid of shape
         (M, N_1, ..., N_M)
     with g[m, n_1, ..., n_M] = n_(m+1).  This can be used as an index into an
@@ -293,6 +295,9 @@ def thin_ordered(factor, grid, data):
     thinning = numpy.argsort(data)[::factor]
     return (grid[:, thinning], data[thinning])
 
+def thin_ordered_by(factor):
+    return lambda grid, data: thin_ordered(factor, grid, data)
+
 
 def apply_ROI(data, origin, ROI):
     '''Applies a Region Of Interest to image returning the windowed image
@@ -310,7 +315,7 @@ def apply_ROI(data, origin, ROI):
     return data[index], origin - low
 
 
-def apply_window(data, origin, scaling, window):
+def apply_scaled_window(data, origin, scaling, window):
     '''Applies the given window to data.'''
     # Convert the computed window into a new Region Of Interest
     window_origin, window_extent = window
@@ -329,18 +334,87 @@ def gamma_correct(data, gamma, max_data):
 
 
 def doFit(fitter, data,
+        origin=0, scaling=1,
+        ROI=None, window_size=None,
         thinning=None, data_thinning=None,
-        gamma=None, window=None, ROI=None, origin=0,
-        scaling=1, **kargs):
+        gamma=None,
+        results=None, **kargs):
     '''General fitter.  Takes the following arguments:
 
     fitter
-        This object should have two attributes, .prefit and .fit.  The routine
-        .prefit(data) returns a set of initial parameters from the given data,
-        and .fit(initial, xy, data) performs the fit on decimated data.
+        This object should have three attributes, .prefit, .fit and .window:
+
+            initial = .prefit(data, origin, scaling)
+                Returns an initial estimate of the fit to data taking into
+                account the giving origin and scaling.  The result is an array
+                of values suitable for passing to the .fit and .window routines.
+
+            origin, extent = .window(initial, size)
+                Returns a "region of interest" computed from the initial
+                parameters scaled by size, normally in standard deviations.  The
+                region of interest is returned in scaled units, and is converted
+                back into pixels to select a sub-region of the data.
+
+            fit, error = .fit(initial, grid, data, **kargs)
+                The detailed fitting operation is performed starting from the
+                computed initial parameters.  The data will have been thinned
+                and windowed by this point, and the grid defines the coordinates
+                of each data point with the original origin and scaling taken
+                into account.  Extra arguments are passed through to the
+                underlying fit algorithm.
+                    data is a vector with N points, grid is a MxN matrix where M
+                is the dimensionality (.ndim) of the original data set.
 
     data
-        This is the initial data to be fitted.
+        This is the initial data to be fitted, and should have the correct
+        number of dimensions expected by the fitter.
+
+    origin, scaling
+        The translation from pixel coordinates (indexed by integers starting
+        from 0) to underlying model coordinates is specified by these
+        parameters, and the returned fit will be in terms of the model
+        coordinates.  The translation from pixel coordinates to model
+        coordinates is given by the equation
+
+            model_units = scaling * (pixel_units - origin)
+
+        so the origin is in pixel coordinates, and the scaling is in model units
+        per pixel.
+
+    ROI
+        If specified this is a "Region Of Interest", consisting of a pair
+        (ROI_origin, ROI_extent) where ROI_origin is in pixels relative to
+        origin and ROI_extent is the size of the region of interest in pixels.
+
+    window_size
+        If specified this is a window size to be passed to fitter.window() to
+        automatically compute a window on the selected data.
+
+    thinning
+        After windowing the data will be thinned by an integer factor.  This can
+        be a single integer, or a thinning factor for each dimension of the
+        data.
+
+    data_thinning
+        Data dependent thinning can also be applied to the data.  This is done
+        last, just before gamma correction, so needs to work on the data
+        indexing grid.  If specified this must be a function of the form
+
+            grid, data = data_thinning(grid, data)
+
+        where grid and data are as described above for fitter.fit()
+
+    gamma
+        If gamma correction on the data is required this should be a pair
+        (factor, max_data) where max_data is the maximum normal data value, eg
+        255 for 8-bit data, and factor is the required gamma correction.
+
+    results
+        If results is passed then intermediate computations will be assigned to
+        fields of this structure as follows:
+
+            .grid   Final chosen grid used for fitting
+            .data   Final data set used for fitting
     '''
 
     # Convert inputs into arrays of the appropriate size
@@ -356,9 +430,9 @@ def doFit(fitter, data,
     initial = fitter.prefit(data, origin, scaling)
 
     # Window the data if required.
-    if window is not None:
-        data, origin = apply_window(
-            data, origin, scaling, fitter.window(initial, window))
+    if window_size is not None:
+        data, origin = apply_scaled_window(
+            data, origin, scaling, fitter.window(initial, window_size))
 
     if thinning is not None:
         # Thin the data uniformly in all dimensions.
@@ -369,21 +443,24 @@ def doFit(fitter, data,
     # Compute the appropriate coordinate grid and perform any further data
     # dependent thinning if required; finally we the data down to a single
     # dimension for fitting.
-    xy = flatten_grid(grid(data.shape))
-    xy = scaling[:, None] * (xy - origin[:, None])
+    grid = flatten_grid(create_grid(data.shape))
+    grid = scaling[:, None] * (grid - origin[:, None])
     data = data.flatten()
+    if results:
+        results.grid = grid
+        results.data = data
 
     # Do data dependent thinning if selected.
     if data_thinning:
-        xy, data = data_thinning(xy, data)
+        grid, data = data_thinning(grid, data)
 
     # Finally perform gamma correction on the data before performing the fit.
     if gamma:
         data = gamma_correct(data, *gamma)
 
     # Perform the fit on the reduced data set and return the result.
-    result, chi2 = fitter.fit(initial, xy, data, **kargs)
-    return result, chi2 / len(data)
+    fit, chi2 = fitter.fit(initial, grid, data, **kargs)
+    return fit, chi2 / len(data)
 
 
 def MakeDoFit(fitter):
