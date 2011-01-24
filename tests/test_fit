@@ -35,7 +35,10 @@ print image.shape
 pyplot.imshow(image.T)
 pyplot.show()
 
-fit, error = fit_lib.doFit2dGaussian(image, thinning=(10,10), window_size = 4)
+fit, error, results = fit_lib.doFit2dGaussian(
+    image, thinning=(10,10), window_size = 4, extra_data = True)
 print fit, error
+print 'results', \
+    results.grid.shape, results.data.shape, results.origin, results.extent
 
 cothread.WaitForQuit()

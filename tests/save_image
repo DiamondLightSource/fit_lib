@@ -10,13 +10,13 @@ require('scipy')
 
 import sys
 import os
+import cothread
+import scipy.io
 
 sys.path.append(os.path.realpath(
     os.path.join(os.path.dirname(__file__), '..')))
 
 from fit_lib import camera
-import cothread
-import scipy.io
 
 
 try:

@@ -336,14 +336,17 @@ def gamma_correct(data, gamma, max_data):
 
 # ------------------------------------------------------------------------------
 
+class FitResults:
+    '''Simple structure used to receive fitting results.'''
 
 def doFit(fitter, data,
         ROI=None, window_size=None,
         thinning=None, data_thinning=None,
         gamma=None,
-        results=None, **kargs):
+        extra_data=False, **kargs):
     '''General fitter.  Returns the best fit together with the mean chi2 over
-    the filtered data set.
+    the filtered data set.  If extra_data is True then a third structure
+    containing intermediate fitting results is also returned.
 
     Takes the following arguments:
 
@@ -403,9 +406,9 @@ def doFit(fitter, data,
         (factor, max_data) where max_data is the maximum normal data value, eg
         255 for 8-bit data, and factor is the required gamma correction.
 
-    results
-        If results is passed then intermediate computations will be assigned to
-        fields of this structure as follows:
+    extra_data
+        If this flag is set then intermediate computations will be assigned to
+        fields of an extra results structure as follows:
 
             .grid       Final chosen grid used for fitting
             .data       Final data set used for fitting
@@ -457,13 +460,16 @@ def doFit(fitter, data,
     fit, chi2 = fitter.fit(initial, grid, data, **kargs)
 
     # If intermediate results requested make them available
-    if results:
+    if extra_data:
+        results = FitResults()
         results.grid = grid
         results.data = data
         results.origin = origin
         results.extent = extent
 
-    return fit, chi2 / len(data)
+        return fit, chi2 / len(data), results
+    else:
+        return fit, chi2 / len(data)
 
 
 def MakeDoFit(fitter):

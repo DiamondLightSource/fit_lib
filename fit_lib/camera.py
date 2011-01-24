@@ -52,5 +52,5 @@ class Mr1394:
         catools.caput('%s:SET_SHUTTR' % self.name, shutter)
 
     def wait_start(self, timeout=5):
-        '''Waits for the important field to be populated.'''
+        '''Waits for the important fields to be populated.'''
         cothread.WaitForAll(self.__waits, timeout = timeout)
