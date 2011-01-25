@@ -2,43 +2,63 @@
 
 # Simple testing of fit
 
+import optparse
+import sys
+import os
+
+parser = optparse.OptionParser(
+    usage = 'Usage: test_fit [options] <filename>')
+parser.add_option(
+    '-p', dest = 'plot', default = False, action = 'store_true',
+    help = 'Plot results')
+parser.add_option(
+    '-w', dest = 'window_size', default = 3, type = 'float',
+    help = 'Automatic window size')
+parser.add_option(
+    '-i', dest = 'maxiter', default = 20, type = 'int',
+    help = 'Maximum fitting iterations')
+parser.add_option(
+    '-g', dest = 'gamma', default = 0, type = 'float',
+    help = 'Image gamma correction')
+
+options, args = parser.parse_args()
+if len(args) != 1:
+    parser.print_help()
+    sys.exit(1)
+
+
 from pkg_resources import require
 require('cothread')
 require('scipy')
-require('matplotlib')
-
-
-import sys
-import os
-import scipy.io
-import cothread
-
-from matplotlib import pyplot
-
-cothread.iqt()
+if options.plot:
+    require('matplotlib')
 
 sys.path.append(os.path.realpath(
     os.path.join(os.path.dirname(__file__), '..')))
 
+import scipy.io
 from fit_lib import fit_lib
 
-
-try:
-    filename, = sys.argv[1:]
-except ValueError:
-    print 'Usage: test_fit <filename>'
-    sys.exit(1)
 
 image = scipy.io.loadmat(filename)['image']
 print image.shape
 
-pyplot.imshow(image.T)
-pyplot.show()
-
 fit, error, results = fit_lib.doFit2dGaussian(
-    image, thinning=(10,10), window_size = 4, extra_data = True)
+    image, thinning=(5, 5),
+    window_size = options.window_size, maxiter = options.maxiter,
+    gamma = (options.gamma, 255),
+    extra_data = True)
 print fit, error
-print 'results', \
-    results.grid.shape, results.data.shape, results.origin, results.extent
+print 'results', results.origin, results.extent
 
-cothread.WaitForQuit()
+if options.plot:
+    import numpy
+    import cothread
+    cothread.iqt()
+
+    from matplotlib import pyplot
+
+    pyplot.imshow(image.T)
+    pyplot.show()
+
+    cothread.WaitForQuit()
