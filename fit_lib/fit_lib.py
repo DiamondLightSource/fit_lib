@@ -325,7 +325,7 @@ def apply_ROI(data, origin, extent):
     high = low + normalise_sequence(extent, data.ndim)
     low[low < 0] = 0
     assert numpy.all(high > 0), 'An axis of the window is outside the dataset'
-    return data[tuple(numpy.s_[l:h] for l, h in zip(low, high))]
+    return data[tuple(numpy.s_[l:h] for l, h in zip(low, high))], low
 
 
 def gamma_correct(data, gamma, max_data):
@@ -419,10 +419,9 @@ def doFit(fitter, data,
     # Apply Region Of Interest if specified.
     if ROI:
         origin, extent = map(numpy.array, ROI)
-        data = apply_ROI(data, origin, extent)
+        data, origin = apply_ROI(data, origin, extent)
     else:
         origin = numpy.zeros(data.ndim)
-        extent = data.shape
 
     # Create a sensible initial fit.
     initial = fitter.prefit(data)
@@ -431,8 +430,9 @@ def doFit(fitter, data,
     if window_size is not None:
         window_origin, extent = \
             map(numpy.int_, fitter.window(initial, window_size))
+        data, window_origin = apply_ROI(data, window_origin, extent)
         origin += window_origin
-        data = apply_ROI(data, window_origin, extent)
+    extent = data.shape
 
     if thinning is None:
         thinning = numpy.ones(data.ndim)
