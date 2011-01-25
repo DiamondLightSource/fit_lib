@@ -290,16 +290,10 @@ def normalise_sequence(input, rank):
 
 
 def thin_uniformly(data, factor):
+    '''Reduces data array by factor, which can be a single number, or an array
+    of data.ndim points.'''
     factor = normalise_sequence(factor, data.ndim)
     return data[tuple(numpy.s_[::f] for f in factor)]
-
-    '''Given a grid and a dataset indexed by that grid reduces the dataset by a
-    factor of F^M where M is the number of dimensions of data and F is the
-    thinning factor.'''
-    # Again numpy index hacks.  The two dimensional expression would be
-    #   xy[:, ::factor, ::factor], data[::factor, ::factor]
-    ix = tuple(numpy.s_[::f] for f in normalise_sequence(factor, data.ndim))
-    return grid[(numpy.s_[:],) + ix], data[ix]
 
 
 def flatten_grid(grid):
