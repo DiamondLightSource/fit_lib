@@ -72,7 +72,7 @@ class Mr1394:
 
     def monitor_variable(self, pv, field):
         def update(value):
-            setattr(self, field, value)
+            setattr(self, field, int(value))
 
         update(catools.caget(pv))
         catools.camonitor(pv, update)

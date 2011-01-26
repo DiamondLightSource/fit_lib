@@ -29,33 +29,36 @@ class StepStrategy:
         self.name = name                # Just for debugging
         self.min = min
         self.max = max
-        self.step_size = 1
-        self.last_step = 0
+        self.direction = 0
+        self.this_step = 1
+        self.last_step = 1
         self.max_step = (max - min) // 2
 
-    def __update_step(self, this_step):
-        # Terribly simple minded strategy: double our steps every time we keep
-        # stepping in the same direction, reset our step size to zero otherwise.
-        if this_step == self.last_step:
-            self.step_size = min(self.max_step, 2*self.step_size)
+    def __update_step(self, direction):
+        if self.direction == direction:
+            # New step in same direction as before.  Increment step
+            last_step = self.this_step
+            self.this_step = min(self.max_step, self.this_step + self.last_step)
+            self.last_step = last_step
         else:
-            self.step_size = 1
-        self.last_step = this_step
+            self.direction = direction
+            self.this_step = 1
+            self.last_step = 1
 
     def step_up(self, current, max=None):
         if max is None:  max = self.max
         if current < max:
             self.__update_step(+1)
-        return min(max, current + self.step_size)
+        return min(max, current + self.this_step)
 
     def step_down(self, current, min=None):
         if min is None:  min = self.min
         if current > min:
             self.__update_step(-1)
-        return max(min, current - self.step_size)
+        return max(min, current - self.this_step)
 
     def stand(self):
-        this_step = 0
+        self.direction = 0
 
 
 class AutoGain:
@@ -140,3 +143,25 @@ class AutoGain:
             elif shutter < self.shutter.max:
                 self.shutter_up()
                 self.gain.stand()
+
+
+class AutoShutter:
+    def __init__(self, camera, gain=None, min_shutter=None, max_shutter=None):
+        if min_shutter is None:     min_shutter = camera.MIN_SHUTTER
+        if max_shutter is None:     max_shutter = camera.MAX_SHUTTER
+        self.camera = camera
+        self.shutter = StepStrategy('shutter', min_shutter, max_shutter)
+        self.gain = gain
+
+    def autogain(self, quality):
+        if self.gain and self.gain != self.camera.gain:
+            self.camera.set_gain(self.gain)
+
+        if quality == Quality.IMAGE_GOOD:
+            self.shutter.stand()
+        elif quality == Quality.IMAGE_BRIGHT:
+            self.camera.set_shutter(
+                self.shutter.step_down(self.camera.shutter))
+        elif quality == Quality.IMAGE_FAINT:
+            self.camera.set_shutter(
+                self.shutter.step_up(self.camera.shutter))
