@@ -47,6 +47,7 @@ class _Subscription:
             # We store the current camera image dimensions with the image as we
             # capture it so we have a fighting chance of getting the right
             # dimensions if the image changes during capture.
+            value = value[:self.camera.width * self.camera.height]
             self.queue.Signal((value, self.camera.width, self.camera.height))
 
     def get_image(self, timeout=5):
@@ -90,6 +91,7 @@ class Mr1394:
         '''Attempts to retrieve an image with the currently configured height
         and width.  If there's a size mismatch an exception is raised.'''
         raw_image = catools.caget('%s:DATA' % self.name,
+            count = self.width * self.height,
             timeout = timeout, format = catools.FORMAT_TIME)
         return format_raw_image(raw_image, self.width, self.height)
 
