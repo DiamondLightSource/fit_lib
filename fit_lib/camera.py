@@ -79,8 +79,8 @@ class Mr1394:
 
     def __init__(self, name):
         self.name = name
-        self.monitor_variable('%s:WIDTH' % name, 'width')
-        self.monitor_variable('%s:HEIGHT' % name, 'height')
+        self.monitor_variable('%s:WIDTH' % name[0:14], 'width')
+        self.monitor_variable('%s:HEIGHT' % name[0:14], 'height')
         self.monitor_variable('%s:STATUS' % name, 'status')
         self.monitor_variable('%s:SET_GAIN' % name, 'gain')
         self.monitor_variable('%s:SET_SHUTTR' % name, 'shutter')
@@ -147,4 +147,3 @@ class TomGigE:
     def subscribe(self, max_backlog = 10):
         return _Subscription(self, '%s:ARR:ArrayData' % self.name, max_backlog)
 
-        
