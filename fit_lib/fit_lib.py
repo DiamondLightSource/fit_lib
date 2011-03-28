@@ -160,6 +160,7 @@ def prefit_2D_Gaussian(image):
     mean_y = numpy.sum(y * image_y)
     var_y  = numpy.sum((y - mean_y)**2 * image_y)
     # Convert to initial Gaussian fit parameters
+    # [baseline, amplitude, x0, y0, sigx, sigy, theta]
     return numpy.array([
         min, max - min, mean_x, mean_y, 0.5 / var_x, 0.5 / var_y, 0.0])
 
@@ -259,6 +260,110 @@ class Fitter2dGaussian_0(static.Static):
     fit    = fit2dGaussian_0
     window = WindowGaussian2d
 
+# ------------------------------------------------------------------------------
+# 2D donut Gaussian fit
+
+# The 2D Gaussian model is parameterised by six values:
+#
+#   g_0, K, x_0, y_0, A, r
+#
+#   g_0 is the baseline
+#   K is the amplitude
+#   x0 and y0 are the offsets from the origin
+#   A is the siga scaling
+#   r is radius of the ring
+
+# corresponding to the calculation
+#
+#   G(x,y) = g_0 + K * exp(-A*(r-(sqrt((x-x_0) + (y-y_0))))**2)
+
+# TEMP ..... NEEDS TO BE ADAPTED TO THE NEW FUNCTION!!
+def prefit_2D_donut(image):
+    '''Computes initial estimates for 2D Gaussian fit to image.  Returns array
+    of parameters in the order for fitting.'''
+
+    assert image.ndim == 2 and (numpy.array(image.shape) > 1).all(), \
+        'Can only fit to rectangular image'
+
+    # This is done by projecting the image onto X and Y (by taking means) and
+    # then computing statistics from these projections.  The results are the
+    # combined into an initial estimate for the 2D fit.
+
+    # Estimate vertical range
+    min = float(image.min())
+    max = float(image.max())
+    # Project the image onto its axes, convert these into densities
+    total = float(image.sum())
+    image_x = image.sum(axis = 1) / total
+    image_y = image.sum(axis = 0) / total
+    # Compute x and y grids with given scale and origin
+    x = numpy.arange(len(image_x))
+    y = numpy.arange(len(image_y))
+
+    # Compute statistics along each axis.
+    # Note that these are only good if we have a complete enough curve!
+    mean_x = numpy.sum(x * image_x)
+    var_x  = numpy.sum((x - mean_x)**2 * image_x)
+    mean_y = numpy.sum(y * image_y)
+    var_y  = numpy.sum((y - mean_y)**2 * image_y)
+    # Convert to initial Gaussian fit parameters
+    # [baseline, amplitude, x0, y0, sigx, sigy, theta]
+    return numpy.array([
+        min, max - min, mean_x, mean_y, 0.5 / var_x, 0.5 / var_y, 0.0])
+
+# TEMP ..... NEEDS TO BE ADAPTED TO THE NEW FUNCTION!!
+def Windowdonut2d(params, window):
+    '''Returns a sensible region in which to attempt the fit.  In this case
+    we return +-window*sigma around the fitted origin.'''
+    _, _, mean_x, mean_y, A, B, _ = params
+    win_x = window * math.sqrt(0.5 / A)
+    win_y = window * math.sqrt(0.5 / B)
+    return ((mean_x - win_x, mean_y - win_y), (2*win_x, 2*win_y))
+
+# TEMP ..... NEEDS TO BE ADAPTED TO THE NEW FUNCTION!!
+def donut2dValid(params):
+    A, B, C = params[-3:]
+    return A > 0 and B > 0 and 4 * A * B > C * C
+
+def donut2d(params, xy):
+    '''Test function used to compute modelled Gaussian on the given x,y
+    vectors.'''
+    g_0, K, x_0, y_0, A, r = params
+    x, y = xy
+    x = x - x_0
+    y = y - y_0
+    return g_0 + K * numpy.exp(-(A * (r - ((x**2 + y**2)**0.5))**2))
+
+# TEMP ..... NEEDS TO BE ADAPTED TO THE NEW FUNCTION!!
+def fit2ddonut(params, xy, data, **kargs):
+    '''Given a good initial estimate and flattenned and thinned data returns the
+    best 2D Gaussian fit to the dataset.'''
+    return levmar.fit(
+        Gaussian2dValid, Gaussian2d, Gaussian2dJacobian,
+        params, data, (xy,), **kargs)
+
+# TEMP ..... NEEDS TO BE ADAPTED TO THE NEW FUNCTION!!
+def donut2dRescale(params, origin=0, scaling=1):
+    '''Rescales the coordinates of the fit to the specified origin and scaling
+    so that the new coordinate and old coordinates are related by the equation
+
+        new_coord = scaling * (old_coord - origin)
+    '''
+    g_0, K, x_0, y_0, A, B, C = params
+    O_x, O_y = normalise_sequence(origin, 2)
+    s_x, s_y = normalise_sequence(scaling, 2)
+    return (
+        g_0, K, s_x * (x_0 - O_x), s_y * (y_0 - O_y),
+        A / (s_x*s_x), B / (s_y*s_y), C / (s_x*s_y))
+
+
+# Gather the key elements of these fitters.
+
+# TEMP ..... NEEDS TO BE ADAPTED TO THE NEW FUNCTION!!
+class Fitter2ddonut(static.Static):
+    prefit = prefit_2D_Gaussian
+    fit    = fit2dGaussian
+    window = WindowGaussian2d
 
 # ------------------------------------------------------------------------------
 
