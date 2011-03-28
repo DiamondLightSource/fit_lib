@@ -103,3 +103,48 @@ class Mr1394:
 
     def subscribe(self, max_backlog = 10):
         return _Subscription(self, '%s:DATA' % self.name, max_backlog)
+
+
+class TomGigE:
+    """Interface over EPICS to Tom's GigE cameras cameras."""
+
+    MIN_GAIN = 245
+    MAX_GAIN = 1023
+    MIN_SHUTTER = 1
+    MAX_SHUTTER = 4095
+
+    def monitor_variable(self, pv, field):
+        def update(value):
+            setattr(self, field, int(value))
+
+        update(catools.caget(pv))
+        catools.camonitor(pv, update)
+
+    def __init__(self, name):
+        self.name = name
+        self.monitor_variable('%s:CAM:ArraySizeX_RBV' % name, 'width')
+        self.monitor_variable('%s:CAM:ArraySizeY_RBV' % name, 'height')
+        self.monitor_variable('%s:CAM:DetectorState_RBV' % name, 'status')
+        self.monitor_variable('%s:CAM:Gain_RBV' % name, 'gain')
+        self.monitor_variable('%s:CAM:AcquireTime_RBV' % name, 'shutter')
+        # Note that the camera provides GAIN and SHUTTER fields, but these don't
+        # appear to update normally.
+
+    def get_image(self, timeout=10):
+        '''Attempts to retrieve an image with the currently configured height
+        and width.  If there's a size mismatch an exception is raised.'''
+        raw_image = catools.caget('%s:ARR:ArrayData' % self.name,
+            count = self.width * self.height,
+            timeout = timeout, format = catools.FORMAT_TIME)
+        return camera.format_raw_image(raw_image, self.width, self.height)
+
+    def set_gain(self, gain):
+        catools.caput('%s:CAM:Gain' % self.name, gain)
+
+    def set_shutter(self, shutter):
+        catools.caput('%s:CAM:AcquireTime' % self.name, shutter)
+
+    def subscribe(self, max_backlog = 10):
+        return _Subscription(self, '%s:ARR:ArrayData' % self.name, max_backlog)
+
+        
