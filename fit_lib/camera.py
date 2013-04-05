@@ -172,3 +172,34 @@ class TomGigE:
     def subscribe(self, max_backlog = 10):
         return _Subscription(self, '%s:ARR:ArrayData' % self.name, max_backlog)
 
+class AreaDetector_cams:
+    """Interface over EPICS to Area detector cameras."""
+
+    def monitor_variable(self, pv, field):
+        def update(value):
+            setattr(self, field, int(value))
+
+        update(catools.caget(pv))
+        catools.camonitor(pv, update)
+
+    def __init__(self, name):
+        self.name = name
+        self.monitor_variable('%s:CAM:MaxSizeX_RBV' % name, 'width')
+        self.monitor_variable('%s:CAM:MaxSizeY_RBV' % name, 'height')
+       # self.monitor_variable('%s:CAM:DetectorState_RBV' % name, 'status')
+        self.monitor_variable('%s:CAM:Gain_RBV' % name, 'gain')
+        self.monitor_variable('%s:CAM:AcquireTime_RBV' % name, 'shutter')
+
+
+    def get_image(self, timeout=10):
+        '''Attempts to retrieve an image with the currently configured height
+        and width.  If there's a size mismatch an exception is raised.'''
+        raw_image = catools.caget('%s:ARR:ArrayData' % self.name,
+            count = self.width * self.height,
+            timeout = timeout, format = catools.FORMAT_TIME)
+        return camera.format_raw_image(raw_image, self.width, self.height)
+
+    def subscribe(self, max_backlog = 10):
+        return _Subscription(self, '%s:ARR:ArrayData' % self.name, max_backlog)
+
+
