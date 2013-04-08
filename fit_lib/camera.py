@@ -107,10 +107,12 @@ class Mr1394:
         self.monitor_variable('%s:WIDTH' % name[0:14], 'width')
         self.monitor_variable('%s:HEIGHT' % name[0:14], 'height')
         self.monitor_variable('%s:STATUS' % name, 'status')
-        self.monitor_variable('%s:SET_GAIN' % name, 'gain')
-        self.monitor_variable('%s:SET_SHUTTR' % name, 'shutter')
         # Note that the camera provides GAIN and SHUTTER fields, but these don't
         # appear to update normally.
+        self.monitor_variable('%s:SET_GAIN' % name, 'gain')
+        self.monitor_variable('%s:SET_SHUTTR' % name, 'shutter')
+        # Scaling from pixels to um
+        self.scaling = 4.65
 
     def get_image(self, timeout=5):
         '''Attempts to retrieve an image with the currently configured height
@@ -161,7 +163,7 @@ class TomGigE:
         raw_image = catools.caget('%s:ARR:ArrayData' % self.name,
             count = self.width * self.height,
             timeout = timeout, format = catools.FORMAT_TIME)
-        return camera.format_raw_image(raw_image, self.width, self.height)
+        return format_raw_image(raw_image, self.width, self.height)
 
     def set_gain(self, gain):
         catools.caput('%s:CAM:Gain' % self.name, gain)
@@ -189,6 +191,7 @@ class AreaDetector_cams:
        # self.monitor_variable('%s:CAM:DetectorState_RBV' % name, 'status')
         self.monitor_variable('%s:CAM:Gain_RBV' % name, 'gain')
         self.monitor_variable('%s:CAM:AcquireTime_RBV' % name, 'shutter')
+        self.scaling  = 1
 
 
     def get_image(self, timeout=10):
@@ -197,7 +200,7 @@ class AreaDetector_cams:
         raw_image = catools.caget('%s:ARR:ArrayData' % self.name,
             count = self.width * self.height,
             timeout = timeout, format = catools.FORMAT_TIME)
-        return camera.format_raw_image(raw_image, self.width, self.height)
+        return format_raw_image(raw_image, self.width, self.height)
 
     def subscribe(self, max_backlog = 10):
         return _Subscription(self, '%s:ARR:ArrayData' % self.name, max_backlog)
