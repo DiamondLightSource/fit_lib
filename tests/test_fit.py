@@ -26,7 +26,7 @@ if len(args) != 1:
     parser.print_help()
     sys.exit(1)
 
-
+filename = ''.join(args)
 from pkg_resources import require
 require('cothread')
 require('scipy')
@@ -41,15 +41,25 @@ from fit_lib import fit_lib
 
 
 image = scipy.io.loadmat(filename)['image']
-print image.shape
+print 'Image shape', image.shape
 
 fit, error, results = fit_lib.doFit2dGaussian(
     image, thinning=(5, 5),
     window_size = options.window_size, maxiter = options.maxiter,
     gamma = (options.gamma, 255),
     extra_data = True)
-print fit, error
-print 'results', results.origin, results.extent
+print 'Fitter results'
+print 'Baseline ', fit[0]
+print 'Peak height ', fit[1]
+print 'Origin x (pixels)', fit[2]
+print 'Origin y (pixels)', fit[3]
+print 'Sigma x (???)', fit[4]
+print 'Sigma y (???)', fit[5]
+print 'Angle (???) ', fit[6]
+print 'error', error
+print 'suggested region of interest (pixels)'
+print 'Origin ', results.origin
+print 'Extent ', results.extent
 
 if options.plot:
     import numpy
