@@ -53,13 +53,15 @@ print 'Baseline ', fit[0]
 print 'Peak height ', fit[1]
 print 'Origin x (pixels)', fit[2]
 print 'Origin y (pixels)', fit[3]
-print 'Sigma x (???)', fit[4]
-print 'Sigma y (???)', fit[5]
-print 'Angle (???) ', fit[6]
+print 'A', fit[4]
+print 'B', fit[5]
+print 'C ', fit[6]
 print 'error', error
 print 'suggested region of interest (pixels)'
 print 'Origin ', results.origin
 print 'Extent ', results.extent
+print 'If you want sigmas and rotation then use'
+print ' [sigmax, sigmay, rotation] = fit_lib.convert_abc(A, B, C)'
 
 if options.plot:
     import numpy
