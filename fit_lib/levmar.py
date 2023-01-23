@@ -116,7 +116,7 @@ def levmar(f, df, a,
     assert e is not None, 'Bad initial parameters'
     chi2 = (e**2).sum()
 
-    for iter in xrange(maxiter):
+    for iter in range(maxiter):
         # From Jacobian matric compute alpha0, an estimate of the Hessian, and
         # beta, (half) the gradient vector.
         de = df(a)

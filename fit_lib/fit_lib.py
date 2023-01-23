@@ -29,8 +29,7 @@ import math
 import numpy
 import types
 
-import levmar
-import static
+from fit_lib import levmar, static
 
 
 
@@ -413,7 +412,7 @@ def create_grid(shape):
 def normalise_sequence(input, rank):
     '''Lifted from numpy.  Converts input to a list of length rank, replicating
     as necessary if it's not already a sequence.'''
-    if (isinstance(input, (types.IntType, types.LongType, types.FloatType))):
+    if type(input) in (int, float):
         return [input] * rank
     else:
         return input

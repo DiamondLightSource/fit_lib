@@ -1,10 +1,18 @@
+#!/usr/bin/env dls-python3
+import os
+import sys
+
 from setuptools import setup
 
-# these lines allow the version to be specified in Makefile.private
-import os
-version = os.environ.get("MODULEVER", "0.0")
 
-setup(
-    name = 'fit_lib', version = version,
-    packages = ['fit_lib'],
-    include_package_data = True, zip_safe = False)
+# Place the directory containing _version_git on the path
+for path, _, filenames in os.walk(os.path.dirname(os.path.abspath(__file__))):
+    if "_version_git.py" in filenames:
+        sys.path.append(path)
+        break
+
+from _version_git import __version__, get_cmdclass  # noqa
+
+# Setup information is stored in setup.cfg but this function call
+# is still necessary.
+setup(cmdclass=get_cmdclass(), version=__version__)
